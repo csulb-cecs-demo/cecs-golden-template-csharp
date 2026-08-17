@@ -1,0 +1,44 @@
+name: CI
+
+# Student-facing feedback loop. This workflow builds the same solution and
+# runs the same tests that the autograder should run.
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out the project
+        uses: actions/checkout@v4
+
+      - name: Install .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Restore dependencies
+        run: dotnet restore golden-template-csharp.sln
+
+      - name: Build
+        run: dotnet build golden-template-csharp.sln --configuration Release --no-restore
+
+      - name: Run tests
+        run: dotnet test golden-template-csharp.sln --configuration Release --no-build --verbosity normal
+
+      - name: Check the Verification Log was filled in
+        if: always()
+        shell: bash
+        run: |
+          if grep -qE '^Name:\s*$' VERIFICATION-LOG.md 2>/dev/null; then
+            echo "::warning file=VERIFICATION-LOG.md::Verification Log is not signed — fill it in before your final push."
+          fi

@@ -1,0 +1,71 @@
+name: Core Standard
+
+# ==============================================================================
+# RFP-1 "Definition of Done" — Governance Protocol.
+#
+#   "A clear implementation strategy and documentation that enables faculty to
+#    fork the framework for course-specific needs without compromising the
+#    integrity of the 'Core Standard.'"
+#
+# docs/governance.md is that strategy. This workflow reports against it.
+#
+# ------------------------------------------------------------------------------
+# FACULTY: this is ADVISORY. It will not fail your build.
+# ------------------------------------------------------------------------------
+#
+#   The golden template is offered as a guideline — a best practice the task
+#   force recommends — not as policy. Nothing here is mandatory for any faculty
+#   member, and this workflow has no authority over your course.
+#
+#   What it does: prints a short report of where your repo differs from the
+#   recommended baseline, and writes it to the job summary. Every run is green.
+#   Differing from a recommendation is not an error, so it is not reported as
+#   one.
+#
+#   If you WANT the guardrail in your own course — say you are handing the repo
+#   to a TA and want drift caught — add --strict to the run step below and it
+#   will fail on gaps. That is your call to make, per course. The default
+#   assumes you have not made it.
+# ==============================================================================
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  baseline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      - name: Self-check against the recommended baseline
+        # FACULTY: append --strict here to make gaps fail this job.
+        run: python3 .github/scripts/check_core_standard.py | tee baseline.txt
+
+      - name: Write the report to the build summary
+        if: always()
+        run: |
+          {
+            echo "## Core Standard self-check"
+            echo ""
+            echo "_A best-practice baseline the task force recommends — **not** a"
+            echo "requirement. Differences may be exactly right for your course._"
+            echo ""
+            echo '```'
+            cat baseline.txt 2>/dev/null || echo "(no report produced)"
+            echo '```'
+            echo ""
+            echo "See [docs/governance.md](docs/governance.md) for what each"
+            echo "recommendation is for, so you can decide whether it applies to you."
+          } >> "$GITHUB_STEP_SUMMARY"

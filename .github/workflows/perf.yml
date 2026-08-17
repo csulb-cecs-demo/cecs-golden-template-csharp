@@ -1,0 +1,123 @@
+name: Performance Sanity Check
+
+# ==============================================================================
+# RFP-1 "Definition of Done" — Performance Sanity Check.
+#
+#   "An automated GitHub Action that simulates 75 concurrent user interactions
+#    to verify system architecture stability. The pipeline must include defined
+#    'Pass/Fail' thresholds (e.g., median latency < 200ms; error rate < 1%) and
+#    generate a summary performance report artifact available in the GitHub
+#    Action build logs."
+#
+# Mapping, line by line:
+#   75 concurrent interactions -> perf/smoke.js holds 75 VUs at plateau
+#   Pass/Fail thresholds       -> k6 thresholds; k6 exits non-zero on breach,
+#                                 so this job fails on its own
+#   Summary report artifact    -> uploaded as an artifact AND written to the
+#                                 job summary, so it is readable in the build
+#                                 without downloading anything
+#
+# ------------------------------------------------------------------------------
+# FACULTY: this is OPT-IN, and that is deliberate
+# ------------------------------------------------------------------------------
+#
+#   It does not run on push. Enable it for an assignment that builds a service
+#   by adding a `push:` trigger below, or run it on demand from the Actions tab.
+#
+#   Why opt-in: most assignments have no service to put under load. Running
+#   this against a stand-in for a semaphores lab produces a green check that
+#   attests to nothing, and green checks that attest to nothing are how the
+#   autograder came to silently pass every submission. One meaningless green
+#   badge devalues every real one next to it.
+#
+#   It also does not test the grading pipeline, which is not under stress from
+#   a class — students work asynchronously over days. See perf/README.md.
+# ==============================================================================
+
+on:
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: 'Target to load-test (default: the bundled reference service)'
+        required: false
+        default: ''
+  # FACULTY: uncomment for a service-building assignment.
+  # push:
+  #   branches: ['**']
+
+permissions:
+  contents: read      # runs student code; keep it read-only
+
+jobs:
+  perf:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      - name: Start the target service
+        # Skipped when a base_url was supplied — that means an external target.
+        if: inputs.base_url == ''
+        run: |
+          python3 perf/reference_service.py &
+          echo "SERVICE_PID=$!" >> "$GITHUB_ENV"
+
+      - name: Wait for the service to accept connections
+        # Poll rather than `sleep 5`. A fixed sleep is either wasted time or a
+        # flaky failure, and which one it is changes with runner load.
+        if: inputs.base_url == ''
+        run: |
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8080/health >/dev/null 2>&1; then
+              echo "service is up after ${i}s"; exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::Reference service never became ready"; exit 1
+
+      - name: Install k6
+        uses: grafana/setup-k6-action@v1
+
+      - name: Run the performance sanity check
+        id: k6
+        env:
+          BASE_URL: ${{ inputs.base_url }}
+        run: |
+          set -o pipefail
+          if [ -n "$BASE_URL" ]; then
+            k6 run -e BASE_URL="$BASE_URL" perf/smoke.js
+          else
+            k6 run perf/smoke.js
+          fi
+
+      - name: Publish the report to the build summary
+        # always() so a THRESHOLD BREACH still publishes its report. The failing
+        # run is the one whose numbers you actually want to read.
+        if: always()
+        run: |
+          if [ -f perf-report.md ]; then
+            cat perf-report.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "::warning::No perf-report.md produced — k6 likely failed before summary generation."
+          fi
+
+      - name: Upload the performance report artifact
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: performance-report
+          path: |
+            perf-report.md
+            perf-report.txt
+            perf-summary.json
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Stop the reference service
+        if: always() && inputs.base_url == ''
+        run: kill "$SERVICE_PID" 2>/dev/null || true

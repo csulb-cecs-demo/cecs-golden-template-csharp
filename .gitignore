@@ -1,0 +1,23 @@
+## .NET build output
+**/bin/
+**/obj/
+
+## Visual Studio and Rider
+.vs/
+.idea/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+## Test and coverage output
+TestResults/
+coverage/
+*.coverage
+*.coveragexml
+
+## Local tooling and generated files
+.dotnet/
+perf-report.md
+perf-report.txt
+perf-summary.json
